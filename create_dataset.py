@@ -1,4 +1,3 @@
-# Based on code from  Harshdeep Gupta
 # Description: Splits the data into train and test using the leave the latest one out strategy 
 
 
@@ -121,7 +120,7 @@ def get_test_negatives(transactions,negatives):
         for movie in negative_movies:
             users.append(user)
             movies.append(movie)
-            ratings.append(1)
+            ratings.append(0)
     negatives = pd.DataFrame({
         "userID" : users,
         "movieID" : movies,
@@ -151,7 +150,7 @@ def get_train_negatives(transactions,negatives):
         for movie in negative_movies:
             users.append(user)
             movies.append(movie)
-            ratings.append(1)
+            ratings.append(0)
     negatives = pd.DataFrame({
         "userID" : users,
         "movieID" : movies,
@@ -203,20 +202,25 @@ def main():
     
     # make the dataset
     train_df, test_df = get_train_test_df(transactions)
-    train_df.columns = [len(transactions.userID.unique()),len(transactions.movieID.unique()),0,0]
-    test_df.columns = [len(transactions.userID.unique()),len(transactions.movieID.unique()),0,0]
-    train_df.to_csv(INPUT_PATH+OUTPUT_PATH_TRAIN,index = False)
-    test_df.to_csv(INPUT_PATH+OUTPUT_PATH_TEST,index = False)
+    train_df.reset_index(inplace=True, drop=True)
+    test_df.reset_index(inplace=True, drop=True)
+
     if(args.num_neg_test>0):
         negative_test = get_test_negatives(transactions,args.num_neg_test)
-        negative_test.columns = [len(transactions.userID.unique()),len(transactions.movieID.unique()),0]
-        negative_test.to_csv(INPUT_PATH+OUTPUT_PATH_TEST_NEGATIVES,index = False)
+        negative_test.reset_index(inplace=True, drop=True)
+        test_df = pd.concat([test_df,negative_test]).sample(frac=1).reset_index(drop=True)
+        test_df.to_csv(INPUT_PATH+OUTPUT_PATH_TEST_NEGATIVES,index = False)
         report_stats(transactions, train_df, test_df,negative_test)
+    else:
+        test_df.to_csv(INPUT_PATH+OUTPUT_PATH_TEST,index = False)
     if(args.num_neg_train>0):
         negative_train = get_train_negatives(transactions,args.num_neg_train)
         negative_train.columns = [len(transactions.userID.unique()),len(transactions.movieID.unique()),0]
-        negative_train.to_csv(INPUT_PATH+OUTPUT_PATH_TRAIN_NEGATIVES,index = False)
+        train_df = pd.concat([test_df,negative_train]).sample(frac=1).reset_index(drop=True)
+        train_df.to_csv(INPUT_PATH+OUTPUT_PATH_TRAIN_NEGATIVES,index = False)
         report_stats(transactions, train_df, test_df,negative_test)
+    else:
+        train_df.to_csv(INPUT_PATH+OUTPUT_PATH_TRAIN,index = False)
     
     return 0
 

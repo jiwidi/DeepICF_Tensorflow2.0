@@ -109,22 +109,35 @@ def get_test_negatives(transactions,negatives):
     users=[]
     movies=[]
     ratings=[]
+    auxuserIDs = []
     list_movies = transactions.movieID.unique()
     oldhandlers = list(logger.handlers)
     logger.addHandler (TqdmLoggingHandler ())
     logging.info('Creating negatives, this will take a while')
+    usermoviedict = {}
+    for user in transactions.userID.unique():
+        usermoviedict[user] = transactions[transactions.userID == user].movieID.unique().tolist()
+    auxusermoviedict = {}
+    for user in transactions.userID.unique(): 
+        uniques = transactions[(transactions['userID']==user) & (transactions['rating']==1)].sort_values(by=['timestamp'])['movieID'].unique().tolist()[:-1] #remove the last saw, NICKLAS >.<
+        zeros = ['0' for u in range(len(transactions.movieID.unique())-len(uniques))]
+        auxusermoviedict[user] = uniques+zeros
     for user in tqdm(transactions.userID.unique()):
-        user_movies = transactions[transactions.userID == user].movieID.unique()
+        useraux = auxusermoviedict[user]
+        user_movies = usermoviedict[user]
         unseen_movies = [item for item in list_movies if item not in user_movies]
         negative_movies = sample(unseen_movies,negatives)
+        usermoviedict[user] = usermoviedict[user] + negative_movies
         for movie in negative_movies:
             users.append(user)
             movies.append(movie)
             ratings.append(0)
+            auxuserIDs.append(useraux)
     negatives = pd.DataFrame({
         "userID" : users,
         "movieID" : movies,
-        "rating" : ratings}
+        "rating" : ratings,
+        "auxuserID" : auxuserIDs}
     )
     logger.handlers = oldhandlers
     return negatives
@@ -139,22 +152,35 @@ def get_train_negatives(transactions,negatives):
     users=[]
     movies=[]
     ratings=[]
+    auxuserIDs = []
     list_movies = transactions.movieID.unique()
     oldhandlers = list(logger.handlers)
     logger.addHandler (TqdmLoggingHandler ())
     logging.info('Creating negatives, this will take a while')
+    usermoviedict = {}
+    for user in transactions.userID.unique():
+        usermoviedict[user] = transactions[transactions.userID == user].movieID.unique().tolist()
+    auxusermoviedict = {}
+    for user in transactions.userID.unique(): 
+        uniques = transactions[(transactions['userID']==user) & (transactions['rating']==1)].sort_values(by=['timestamp'])['movieID'].unique().tolist()[:-1] #remove the last saw, NICKLAS >.<
+        zeros = ['0' for u in range(len(transactions.movieID.unique())-len(uniques))]
+        auxusermoviedict[user] = uniques+zeros
     for user in tqdm(transactions.userID):
-        user_movies = transactions[transactions.userID == user].movieID.unique()
+        useraux = auxusermoviedict[user]
+        user_movies = usermoviedict[user]
         unseen_movies = [item for item in list_movies if item not in user_movies]
         negative_movies = sample(unseen_movies,negatives)
+        usermoviedict[user] = usermoviedict[user] + negative_movies
         for movie in negative_movies:
             users.append(user)
             movies.append(movie)
             ratings.append(0)
+            auxuserIDs.append(useraux)
     negatives = pd.DataFrame({
         "userID" : users,
         "movieID" : movies,
-        "rating" : ratings}
+        "rating" : ratings,
+        "auxuserID" : auxuserIDs}
     )
     logger.handlers = oldhandlers
     return negatives
@@ -181,11 +207,21 @@ def create_mapping(values):
     value_to_id = {value:idx for idx, value in enumerate(values.unique())}
     return value_to_id
 
+
+def parse_user(df,row):
+    uniques = df[(df['userID']==row['userID']) & (df['rating']==1)]['movieID'].unique().tolist()
+    zeros = ['0' for u in range(len(df.movieID.unique())-len(uniques))]
+    return uniques+zeros 
+
 def clean_df(transactions):
     user_mapping = create_mapping(transactions["userID"])
     item_mapping = create_mapping(transactions["movieID"])
-    transactions["userID"] = transactions["userID"].map(user_mapping.get)
-    transactions["movieID"] = transactions["movieID"].map(item_mapping.get)
+    transactions = transactions.sample(10000,random_state=17)
+    transactions['movieID'] += 1
+    transactions['movieID'] = transactions['movieID'].apply(str)
+    transactions['userID'] = transactions['userID'].apply(str)
+    transactions['rating']=1
+    transactions['auxuserID'] = transactions.apply(lambda row: parse_user(transactions,row), axis=1)
     return transactions
 
 def main():
@@ -196,7 +232,10 @@ def main():
         logger.setLevel (logging.WARNING)
     check_data(INPUT_PATH,args.force_download)
     transactions = pd.read_csv(INPUT_PATH+INPUT_FILE, sep="::", names = ['userID', 'movieID', 'rating', 'timestamp'],engine='python')
+    logging.info('Cleaning dataset')
+    transactions = transactions[:10000]
     transactions = clean_df(transactions)
+    print(transactions.head())
     # convert to implicit scenario
     transactions['rating'] = 1
     
@@ -208,7 +247,7 @@ def main():
     if(args.num_neg_test>0):
         negative_test = get_test_negatives(transactions,args.num_neg_test)
         negative_test.reset_index(inplace=True, drop=True)
-        test_df = pd.concat([test_df,negative_test]).sample(frac=1).reset_index(drop=True)
+        test_df = pd.concat([test_df,negative_test],sort=True).sample(frac=1).reset_index(drop=True)
         test_df.to_csv(INPUT_PATH+OUTPUT_PATH_TEST_NEGATIVES,index = False)
         report_stats(transactions, train_df, test_df,negative_test)
     else:
@@ -216,7 +255,7 @@ def main():
     if(args.num_neg_train>0):
         negative_train = get_train_negatives(transactions,args.num_neg_train)
         negative_train.columns = [len(transactions.userID.unique()),len(transactions.movieID.unique()),0]
-        train_df = pd.concat([test_df,negative_train]).sample(frac=1).reset_index(drop=True)
+        train_df = pd.concat([test_df,negative_train],sort=True).sample(frac=1).reset_index(drop=True)
         train_df.to_csv(INPUT_PATH+OUTPUT_PATH_TRAIN_NEGATIVES,index = False)
         report_stats(transactions, train_df, test_df,negative_test)
     else:
